@@ -13,6 +13,37 @@ async function refreshVariables() {
   V = variables;
 }
 
+// 파일명에서 위험한 문자만 정리 (한글/공백 허용)
+function sanitizeFilename(s: string) {
+  return (s || "figma")
+    .replace(/[\\/:*?"<>|]+/g, "-")   // 금지문자 → -
+    .replace(/\s+/g, "-")             // 공백 → -
+    .replace(/-+/g, "-")              // 중복 하이픈 정리
+    .replace(/^-|-$/g, "");           // 양끝 하이픈 제거
+}
+
+// 숫자 두 자리 패드
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// yymmddhhmmss 포맷(로컬 시간 기준). UTC로 쓰고 싶으면 useUTC=true
+function yymmddhhmmss(useUTC = false) {
+  const d = new Date();
+  const Y = (useUTC ? d.getUTCFullYear() : d.getFullYear()) % 100;
+  const M = (useUTC ? d.getUTCMonth() + 1 : d.getMonth() + 1);
+  const D = (useUTC ? d.getUTCDate() : d.getDate());
+  const h = (useUTC ? d.getUTCHours() : d.getHours());
+  const m = (useUTC ? d.getUTCMinutes() : d.getMinutes());
+  const s = (useUTC ? d.getUTCSeconds() : d.getSeconds());
+  return `${pad2(Y)}${pad2(M)}${pad2(D)}${pad2(h)}${pad2(m)}${pad2(s)}`;
+}
+
+// 확장자에 맞는 파일명 만들기
+function buildExportName(ext: "json" | "scss") {
+  const base = sanitizeFilename(figma.root.name || "figma");
+  const stamp = yymmddhhmmss();        // ← "250824153712" 같은 형태
+  return `tokens-${stamp}.${ext}`;
+}
+
 async function run() {
   try {
     const saved = await figma.clientStorage.getAsync("uiSize");
@@ -32,17 +63,15 @@ async function run() {
 
       if (msg?.type === "REQUEST_SCSS") {
         if (!C.length || !V.length) await refreshVariables();
-
         const scss = await buildScssVariables(C, V, {
           preserveAliases: true,
           modeStrategy: "suffix",
         });
-
-        console.log("[FIG to TOK] SCSS length =", scss.length); // 🔎 확인
+        const scssName = buildExportName("scss");
 
         figma.ui.postMessage({
           type: "EXPORT_TEXT",
-          filename: "tokens.scss",
+          filename: scssName,
           mime: "text/x-scss",
           data: scss || "/* (No variables emitted) */\n"
         });
@@ -55,10 +84,13 @@ async function run() {
         const w3cVars   = await buildW3CFromVariables(C, V, tokensByMode);
         const w3cType   = await buildTypeStyles(text);
         const w3cShadow = buildShadows(effect);
-        const payload = { ...w3cVars, ...w3cType, ...w3cShadow };
-        const json = JSON.stringify(payload, null, 2);
-        postJsonInChunks(json, 1024 * 1024, { filename: "tokens.json" });
-        return;
+        const json = JSON.stringify({ ...w3cVars, ...w3cType, ...w3cShadow }, null, 2);
+        const jsonName = buildExportName("json");
+
+        postJsonInChunks(json, 1 << 20, {
+          filename: jsonName,               // ← 여기!
+          mime: "application/json",
+        });
       }
     });
   } catch (e) {
