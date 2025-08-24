@@ -1,0 +1,15 @@
+{
+  "name": "test",
+  "id": "variables-to-json-tokens",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "ui.html",
+  "capabilities": [],
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ]
+  }
+}
