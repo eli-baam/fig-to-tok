@@ -42,16 +42,20 @@
       border: none;
       color: #999;
     }
+    .row {
+      display: flex;
+      gap: 8px;
+    }
     button { 
       background-color: #212121;
-      height: 48px;
+      width: 120px;
+      height: 44px;
       font-weight: 500;
       font-size: 16px;
       color: white;
       cursor:pointer; 
-      border-radius: 12px; 
+      border-radius: 8px; 
       border: none;
-      width: 50%;
       transition: all 0.1s ease-in;
     }
     button:active {
@@ -73,9 +77,13 @@
 <body>
   <div class="wrap">
     <div class="header">
-      <h1>Variables → JSON (tokens)</h1>
-      <p class="desc">현재 파일의 Variables를 JSON으로 저장합니다.</p>
-      <button id="download" disabled>다운로드</button>
+      <h1>FIG to TOK</h1>
+      <p class="desc">현재 파일의 Variables과 Styles를 토큰으로 저장합니다.</p>
+      
+      <div class="row">
+        <button id="btn-json">JSON</button>
+        <button id="btn-scss">SCSS</button>
+      </div>
       <div class="note" id="status">대기 중…</div>
     </div>
 
@@ -85,145 +93,75 @@
   </div>
 
   <script>
-    let blobUrl = null;
+    let acc = "";
+    let filename = "download.txt";
+    let mime = "text/plain";
     let assembling = false;
     let expectedChunks = 0;
     let received = 0;
-    let parts = []; // 문자열 조각 모음
-    let jsonText = "";
 
-    function updateStatus() {
-      const s = document.getElementById("status");
-      if (assembling) {
-        s.textContent = `수신 중… (${received}/${expectedChunks})`;
-      } else if (jsonText) {
-        s.textContent = `완료 (${(jsonText.length/1024/1024).toFixed(2)} MB)`;
-      } else {
-        s.textContent = "대기 중…";
-      }
-    }
+    const statusEl = document.getElementById("status");
+    const previewEl = document.getElementById("preview");
+    const send = (m)=> parent.postMessage({ pluginMessage: m }, "*");
 
-    onmessage = (event) => {
-      const msg = event.data.pluginMessage;
+    document.getElementById("btn-json").onclick = ()=> send({ type: "REQUEST_JSON" });
+    document.getElementById("btn-scss").onclick = ()=> send({ type: "REQUEST_SCSS" });
+
+    function setStatus(t){ statusEl.textContent = t; }
+
+    window.onmessage = (e) => {
+      const msg = e.data?.pluginMessage;
       if (!msg) return;
 
       if (msg.type === "ERROR") {
-        alert("[Variables → JSON] 오류: " + msg.message);
+        alert("[FIG to TOK] 오류: " + msg.message);
         return;
       }
 
+      // 단일 텍스트 전송(SCSS 등)
+      if (msg.type === "EXPORT_TEXT") {
+        const data = msg.data || "";
+        previewEl.value = data.slice(0, 5000);
+        setStatus(`완료 (${(data.length/1024).toFixed(1)} KB)`);
+        const blob = new Blob([data], { type: msg.mime || "text/plain" });
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement("a"), {
+          href: url,
+          download: msg.filename || "export.txt",
+        });
+        a.click(); URL.revokeObjectURL(url);
+        return;
+      }
+
+      // 청크 전송(JSON 등 큰 파일)
       if (msg.type === "EXPORT_BEGIN") {
-        assembling = true;
-        expectedChunks = msg.chunks;
-        received = 0;
-        parts = [];
-        jsonText = "";
-        const btn = document.getElementById("download");
-        btn.disabled = true;
-        updateStatus();
+        acc = ""; filename = msg.filename || filename; mime = msg.mime || mime;
+        assembling = true; expectedChunks = msg.chunks|0; received = 0;
+        previewEl.value = ""; setStatus(`수신 중… (0/${expectedChunks})`);
         return;
       }
-
       if (msg.type === "EXPORT_CHUNK") {
-        parts[msg.index] = msg.data;
-        received++;
-        updateStatus();
+        acc += msg.data || ""; received++;
+        setStatus(`수신 중… (${received}/${expectedChunks})`);
         return;
       }
-
       if (msg.type === "EXPORT_END") {
         assembling = false;
-        jsonText = parts.join("");
-        parts = [];
-        const preview = document.getElementById("preview");
-        preview.value = jsonText.slice(0, 5000);
-
-        if (blobUrl) URL.revokeObjectURL(blobUrl);
-        blobUrl = URL.createObjectURL(new Blob([jsonText], { type: "application/json" }));
-
-        const btn = document.getElementById("download");
-        btn.disabled = false;
-        updateStatus();
+        previewEl.value = acc.slice(0, 5000);
+        setStatus(`완료 (${(acc.length/1024/1024).toFixed(2)} MB)`);
+        const blob = new Blob([acc], { type: mime });
+        const url  = URL.createObjectURL(blob);
+        const a    = Object.assign(document.createElement("a"), { href:url, download: filename });
+        a.click(); URL.revokeObjectURL(url);
         return;
       }
     };
 
+    // 리사이즈 메시지는 그대로 유지
     window.addEventListener("load", () => {
       parent.postMessage({ pluginMessage: { type: "UI_READY" } }, "*");
     });
-
-    new ResizeObserver(requestResize).observe(document.body); // 내용 변화에 따라 자동
-
-    // Window Resizer
-    let autoResizeEnabled = true;
-    function requestResize() {
-      if (!autoResizeEnabled) return;
-      const r = document.body.getBoundingClientRect();
-      parent.postMessage({ pluginMessage: { type: "RESIZE", width: Math.round(r.width), height: Math.round(r.height) } }, "*");
-    }
-
-    function postResize(w, h) {
-      parent.postMessage({ pluginMessage: { type: "RESIZE", width: w, height: h } }, "*");
-    }
-
-    // ---- 자동 리사이즈가 필요하다면, 드래그 중엔 잠시 비활성화
-    function requestResizeFromContent() {
-      if (!autoResizeEnabled) return;     // ✅ 드래그 중이면 무시
-      const rect = document.body.getBoundingClientRect();
-      postResize(Math.round(rect.width), Math.round(rect.height));
-    }
-
-    // (선택) 내용 변화 감지 자동 리사이즈 — 드래그 중엔 동작 안 함
-    const ro = new ResizeObserver(requestResizeFromContent);
-    ro.observe(document.body);
-
-    // ---- 드래그 리사이저
-    window.addEventListener("DOMContentLoaded", () => {
-      const resizer = document.getElementById("resizer");
-      if (!resizer) return;
-
-      let startX = 0, startY = 0, startW = 0, startH = 0;
-
-      function onMove(e) {
-        const w = Math.max(280, startW + (e.clientX - startX));
-        const h = Math.max(160, startH + (e.clientY - startY));
-        console.log("[resizer] move →", w, h);           // 🔎 확인용
-        postResize(Math.round(w), Math.round(h));
-      }
-      function onUp(e) {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        autoResizeEnabled = true;                        // ✅ 드래그 종료 → 자동 리사이즈 복귀
-        console.log("[resizer] end");
-      }
-
-      resizer.addEventListener("pointerdown", (e) => {
-        const rect = document.body.getBoundingClientRect();
-        startX = e.clientX; startY = e.clientY;
-        startW = rect.width; startH = rect.height;
-
-        autoResizeEnabled = false;                       // ✅ 드래그 시작 → 자동 리사이즈 OFF
-        resizer.setPointerCapture(e.pointerId);
-        window.addEventListener("pointermove", onMove);
-        window.addEventListener("pointerup", onUp);
-        console.log("[resizer] start", { startW, startH });
-        e.preventDefault();
-      });
-    });
-
-    
-
-    document.getElementById("download").onclick = () => {
-      const a = document.createElement("a");
-      const now = new Date();
-      const ts = now.toISOString().replace(/[-:]/g,"").slice(0,15).replace("T","-");
-      const safe = (document.title || "figma").replace(/[^\w.-]+/g,"_");
-      a.href = blobUrl;
-      a.download = `${safe}-variables-${ts}.json`;
-      a.click();
-    };
-
-    window.addEventListener("keydown", e => { if (e.key === "Escape") parent.postMessage({pluginMessage:"CLOSE"},"*"); });
   </script>
+
 </body>
 </html>

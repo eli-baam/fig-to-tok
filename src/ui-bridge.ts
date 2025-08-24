@@ -22,11 +22,15 @@ export function send(msg:any) {
   else outbox.push(msg);
 }
 
-export function postJsonInChunks(json: string, chunkSize = 1024*1024) {
+export function postJsonInChunks(json: string, chunkSize = 1<<20, meta?: { filename?: string; mime?: string }) {
   const chunks = Math.ceil(json.length / chunkSize);
-  send({ type: "EXPORT_BEGIN", chunks });
-  for (let i = 0; i < chunks; i++) {
-    send({ type: "EXPORT_CHUNK", index: i, data: json.slice(i*chunkSize, (i+1)*chunkSize) });
-  }
-  send({ type: "EXPORT_END" });
+  send({ type: "EXPORT_BEGIN", chunks, filename: meta?.filename ?? "tokens.json", mime: meta?.mime ?? "application/json" });
+  for (let i=0;i<chunks;i++) send({ type:"EXPORT_CHUNK", index:i, data: json.slice(i*chunkSize, (i+1)*chunkSize) });
+  send({ type:"EXPORT_END" });
+}
+export function postTextInChunks(text: string, chunkSize = 1<<20, meta?: { filename?: string; mime?: string }) {
+  const chunks = Math.ceil(text.length / chunkSize);
+  send({ type: "EXPORT_BEGIN", chunks, filename: meta?.filename ?? "export.txt", mime: meta?.mime ?? "text/plain" });
+  for (let i=0;i<chunks;i++) send({ type:"EXPORT_CHUNK", index:i, data: text.slice(i*chunkSize, (i+1)*chunkSize) });
+  send({ type:"EXPORT_END" });
 }
